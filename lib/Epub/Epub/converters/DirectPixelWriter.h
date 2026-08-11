@@ -145,7 +145,11 @@ struct DirectPixelWriter {
   // Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   inline void writePixel(int logicalX, uint8_t pixelValue) const {
-    // Determine whether to draw based on render mode
+    // Determine whether to draw based on render mode.
+    // pixelValue: 0=black, 1=dark gray, 2=light gray, 3=white.
+    // The draw conditions for GRAYSCALE_MSB / GRAYSCALE_LSB mirror
+    // renderCharImpl's font branches so image and text pixels share the same
+    // plane membership (MSB holds black + dark gray; LSB holds black + light gray).
     bool draw;
     bool state;
     switch (mode) {
@@ -154,12 +158,12 @@ struct DirectPixelWriter {
         state = true;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
-        draw = (pixelValue == 1 || pixelValue == 2);
-        state = false;
+        draw = (pixelValue == 0 || pixelValue == 1);
+        state = true;
         break;
       case GfxRenderer::GRAYSCALE_LSB:
-        draw = (pixelValue == 1);
-        state = false;
+        draw = (pixelValue == 0 || pixelValue == 2);
+        state = true;
         break;
       default:
         return;
@@ -178,7 +182,12 @@ struct DirectPixelWriter {
     const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
-    if (state) {
+    // A4 driver inverts plane polarity (copyGrayscaleXxx does ~buf), so mirror
+    // GfxRenderer::drawPixel's eff = (renderMode != BW) ? !state : state to keep
+    // image pixels on the same polarity as text pixels (both land dark after the
+    // driver inversion). Without this, images render inverted on AA-enabled pages.
+    const bool eff = (mode != GfxRenderer::BW) ? !state : state;
+    if (eff) {
       fb[byteIndex] &= ~bitMask;  // Clear bit (draw black)
     } else {
       fb[byteIndex] |= bitMask;  // Set bit (draw white)
