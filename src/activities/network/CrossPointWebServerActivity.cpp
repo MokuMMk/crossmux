@@ -16,6 +16,7 @@
 #include "NetworkStartup.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
+#include "activities/network/AirDropActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/SubpageLayout.h"
 #include "components/UITheme.h"
@@ -128,6 +129,10 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Connect to Calibre";
   } else if (mode == NetworkMode::CREATE_HOTSPOT) {
     modeName = "Create Hotspot";
+#if FREEINK_DEVICE_READPICO
+  } else if (mode == NetworkMode::AIRDROP) {
+    modeName = "AirDrop";
+#endif
 #if FREEINK_CAP_USB_MSC
   } else if (mode == NetworkMode::USB_DRIVE) {
     modeName = "USB Drive";
@@ -138,6 +143,30 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
 #if FREEINK_CAP_USB_MSC
   if (mode == NetworkMode::USB_DRIVE) {
     activityManager.goToUsbDrive();
+    return;
+  }
+#endif
+
+#if FREEINK_DEVICE_READPICO
+  if (mode == NetworkMode::AIRDROP) {
+    // AirDrop takes the 2.4 GHz radio exclusively (AWDL parks the interface on
+    // channel 6 in promiscuous mode and initializes the WiFi driver itself), so
+    // it never shares a session with the modes below: it is not a server, it
+    // brings nothing up here, and it is only reachable from the mode list,
+    // which this activity shows before it starts any WiFi. Do not start WiFi
+    // around it -- see AirDropActivity's own comment.
+    startActivityForResultWith<AirDropActivity>([this](const ActivityResult&) {
+      // Back from the AirDrop page returns to the mode list, the same way the
+      // Calibre page does, so the four modes stay one menu.
+      state = WebServerActivityState::MODE_SELECTION;
+      startActivityForResultWith<NetworkModeSelectionActivity>([this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          onGoHome();
+        } else {
+          onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+        }
+      });
+    });
     return;
   }
 #endif
