@@ -124,7 +124,8 @@ size_t copySafeName(const char* name, char* out, const size_t capacity) {
 
 // Split "photo.jpg" into "photo" + ".jpg"; a dotfile (".profile") has no
 // extension, it is all stem.
-void splitName(const char* name, char* stem, const size_t stemCapacity, char* extension, const size_t extensionCapacity) {
+void splitName(const char* name, char* stem, const size_t stemCapacity, char* extension,
+               const size_t extensionCapacity) {
   stem[0] = '\0';
   extension[0] = '\0';
 
@@ -301,10 +302,9 @@ void AirDropActivity::buildScreen(UiScreen& screen) const {
   const RenderState state = slots_[publishedSlot_.load(std::memory_order_acquire)];
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight),
-                                                static_cast<int16_t>(metrics.contentSidePadding),
-                                                static_cast<int16_t>(metrics.buttonHintsHeight),
-                                                static_cast<int16_t>(metrics.contentSidePadding)});
+  screen.setContentMarginFromScreen(fui::Insets{
+      static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), static_cast<int16_t>(metrics.contentSidePadding),
+      static_cast<int16_t>(metrics.buttonHintsHeight), static_cast<int16_t>(metrics.contentSidePadding)});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   const fui::ThemeTokens& theme = screen.theme();
