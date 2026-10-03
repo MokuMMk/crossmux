@@ -71,6 +71,17 @@ class HalDisplay {
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false,
                      DisplayRefreshContext context = DisplayRefreshContext::Normal);
+
+  // Cosmetic page reveal: present the live framebuffer with a staggered reveal across the
+  // page instead of one difference push. `dir` is an e0470_turn_dir_t (LTR/RTL/TTB/BTT) in
+  // logical coordinates; the display layer maps it through the current rotation.
+  //
+  // Returns false when this panel has no implementation (supportsPageTurn() is false) or
+  // the reveal could not run, and the caller should fall back to displayBuffer(). The page
+  // is correct either way -- only the transition differs -- so a false return is not an
+  // error path, it is "no animation this time".
+  bool pageTurn(int dir, bool turnOffScreen = false);
+  bool supportsPageTurn() const;
   // Non-blocking refresh (shadow-free): starts the panel waveform and returns
   // while the panel refreshes on its own. The framebuffer must stay untouched
   // until waitRefreshComplete(), and the caller must rebuild the differential

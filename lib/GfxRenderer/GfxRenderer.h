@@ -265,6 +265,13 @@ class GfxRenderer {
   void tapToLogical(float nx, float ny, int& outX, int& outY) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH,
                      DisplayRefreshContext context = DisplayRefreshContext::Normal) const;
+  // 错相揭页。`display` 是私有的，所以照 displayBuffer 的样子转发一层。`dir` 是
+  // e0470_turn_dir_t；不支持的面板返回 false，调用方退回 displayBuffer()。
+  // / Phase-offset page reveal. `display` is private, so this forwards the way displayBuffer
+  // does. `dir` is an e0470_turn_dir_t; panels without it return false and the caller falls
+  // back to displayBuffer().
+  bool supportsPageTurn() const;
+  bool pageTurn(int dir, bool turnOffScreen = false) const;
   // Force the next displayBuffer() to use `mode`, overriding its argument once.
   void requestNextRefresh(const HalDisplay::RefreshMode mode) const {
     nextRefreshOverride = mode;

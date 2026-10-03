@@ -127,6 +127,10 @@ void HalDisplay::displayBufferAsync(HalDisplay::RefreshMode mode, DisplayRefresh
   einkDisplay.displayBufferAsyncNoShadow(convertRefreshMode(mode), convertRefreshContext(context));
 }
 
+bool HalDisplay::supportsPageTurn() const { return einkDisplay.supportsPageTurn(); }
+
+bool HalDisplay::pageTurn(int dir, bool turnOffScreen) { return einkDisplay.pageTurn(dir, turnOffScreen); }
+
 void HalDisplay::waitRefreshComplete() { einkDisplay.waitRefreshComplete(); }
 
 bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }

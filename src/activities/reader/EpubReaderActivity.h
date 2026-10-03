@@ -36,6 +36,14 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long pageTurnDuration = 0UL;
   uint8_t pageTurnRate = 15;
   int8_t pendingManualTurn = 0;
+  // 下一次渲染要用哪个方向的错相揭页；-1 = 不播动画（首屏、跳转、菜单返回、设置关闭）。
+  // pageTurn() 在一次成功的翻页后置上，renderContents() 在推出 B/W 底图前取走并清掉，
+  // 所以一次翻页最多播一次，且不会串到别的渲染路径上。
+  // / Which direction the next render should reveal with; -1 = no animation (first paint,
+  // jumps, returning from a menu, or the setting off). pageTurn() arms it after a
+  // successful turn and renderContents() takes it (and clears it) just before the B/W base
+  // goes out, so one turn animates at most once and never leaks into another render path.
+  int8_t pendingPageTurnDir = -1;
   bool pendingPercentJump = false;
   float pendingSpineProgress = 0.0f;
   bool pendingScreenshot = false;

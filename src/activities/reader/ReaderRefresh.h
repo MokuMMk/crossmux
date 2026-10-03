@@ -45,6 +45,28 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
   }
 }
 
+// 翻页时优先用错相揭页，不可用时退回普通推送。`revealDir` 是 e0470_turn_dir_t，< 0 表示
+// 这次不是翻页（首屏、跳转、菜单返回）。
+//
+// 只有本来就走 FAST 档的那一页才播动画：到期的一次 HALF/FULL 是另一套波形加整屏重画，
+// 硬套揭页会把两种驱动混在一起。刷新节拍无论走哪条路都照常前进。
+//
+// / Display a turn, preferring the phase-offset reveal and falling back to a plain push.
+// `revealDir` is an e0470_turn_dir_t, < 0 meaning "not a turn" (first paint, a jump,
+// returning from a menu).
+//
+// Only a FAST turn is animated: a due HALF/FULL is a different waveform and a full repaint,
+// and forcing the reveal over it would mix the two drives. The refresh cadence advances
+// either way.
+inline void displayWithOptionalReveal(const GfxRenderer& renderer, int& pagesUntilFullRefresh, int revealDir) {
+  const auto mode = consumeRefreshMode(pagesUntilFullRefresh);
+  if (revealDir >= 0 && mode == HalDisplay::FAST_REFRESH && renderer.supportsPageTurn() &&
+      renderer.pageTurn(revealDir)) {
+    return;
+  }
+  renderer.displayBuffer(mode, DisplayRefreshContext::ContinuousReading);
+}
+
 // Display the B/W base of a page whose grayscale pass follows. Panels that
 // combine the base (Paper Mono) defer the activation so base + gray planes go
 // out as one waveform — displaying the base separately makes the gray pass
