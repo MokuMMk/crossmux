@@ -58,6 +58,14 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   items.push_back({MenuAction::DICTIONARY, StrId::STR_LOOKUP});
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
+#if FREEINK_DEVICE_READPICO
+  // 只有 Read Pico 的 E0470A01 实现了错相揭页，所以这一条只在它上面列出。别的板子上
+  // HalDisplay::pageTurn() 会返回 false，阅读器退回普通推送 —— 列出这个开关只会让人困惑。
+  // / Only the Read Pico panel implements the phase-offset reveal, so the entry is listed
+  // only there. Elsewhere HalDisplay::pageTurn() returns false and the reader falls back to
+  // a normal push, so showing the switch would only confuse.
+  items.push_back({MenuAction::PAGE_TURN_ANIMATION, StrId::STR_PAGE_TURN_ANIMATION});
+#endif
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
@@ -122,6 +130,21 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
     requestUpdate();
     return;
   }
+
+#if FREEINK_DEVICE_READPICO
+  if (selectedAction == MenuAction::PAGE_TURN_ANIMATION) {
+    // 就地翻转并落盘，和 NIGHT_MODE 一样：效果在下次翻页时可见，菜单本身不显示状态。
+    // 代价提示写在 STR_PAGE_TURN_ANIMATION 的翻译里没有意义 —— 动画约 1.1s，普通推送约
+    // 0.7s，所以它是"更好看但更慢"的开关。
+    // / Flip in place and persist, same shape as NIGHT_MODE: the effect shows on the next
+    // turn and the menu does not render the state. The trade is the point of it being a
+    // switch at all -- the reveal runs ~1.1 s against ~0.7 s for a plain text push.
+    SETTINGS.pageTurnAnimation = SETTINGS.pageTurnAnimation == 0 ? 1 : 0;
+    SETTINGS.saveToFile();
+    requestUpdate();
+    return;
+  }
+#endif
 
   if (selectedAction == MenuAction::FRONTLIGHT) {
     const bool lightOn = !Frontlight.isOn();

@@ -2097,8 +2097,26 @@ void GfxRenderer::displayBuffer(HalDisplay::RefreshMode refreshMode, DisplayRefr
 #endif
 }
 
-void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {
-  HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
+bool GfxRenderer::supportsPageTurn() const {
+#ifdef SIMULATOR
+  // The simulator has no panel driver behind HalDisplay, so there is no reveal to run.
+  return false;
+#else
+  return display.supportsPageTurn();
+#endif
+}
+
+bool GfxRenderer::pageTurn(int dir, bool turnOffScreen) const {
+#ifdef SIMULATOR
+  (void)dir;
+  (void)turnOffScreen;
+  return false;
+#else
+  return display.pageTurn(dir, turnOffScreen);
+#endif
+}
+
+void GfxRenderer::displayBufferAsync(const HalDisplay::RefreshMode refreshMode, DisplayRefreshContext context) const {  HalDisplay::RefreshMode effectiveRefreshMode = refreshMode;
   if (nextRefreshOverridePending) {
     effectiveRefreshMode = nextRefreshOverride;
     nextRefreshOverridePending = false;

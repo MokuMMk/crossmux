@@ -53,6 +53,7 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "components/FontPreloadView.h"
 #include "util/BookCacheUtils.h"
 #include "util/BookmarkFile.h"
 #include "util/ReadingBackground.h"
@@ -1463,12 +1464,20 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1 || section->isBuilding()) {
       section->currentPage++;
+      // 前进翻页：新页从右侧揭开，所以方向是 RTL（1）。数字直接写，阅读器不引 e0470 头，
+      // 显示层才是它的归属。设置关着或面板不支持时 renderContents() 会退回普通推送。
+      // / Forward turn: the new page is revealed from the right, so the direction is RTL
+      // (1). Numeric on purpose -- the reader does not include the e0470 header; the display
+      // layer owns that. renderContents() falls back to a plain push when the setting is off
+      // or the panel cannot do it.
+      pendingPageTurnDir = 1;
       lastPageTurnTime = millis();
       return true;
     } else if (currentSpineIndex + 1 < epub->getSpineItemsCount()) {
       RenderLock lock;
       nextPageNumber = 0;
       currentSpineIndex++;
+      pendingPageTurnDir = 1;
       section.reset();
       lastPageTurnTime = millis();
       return true;
@@ -1480,6 +1489,7 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
   } else {
     if (section->currentPage > 0) {
       section->currentPage--;
+      pendingPageTurnDir = 0;  // 后退：LTR / backward reveals left-to-right
       lastPageTurnTime = millis();
       return true;
     } else if (currentSpineIndex > 0) {
@@ -1487,6 +1497,7 @@ bool EpubReaderActivity::pageTurn(bool isForwardTurn) {
       nextPageNumber = 0;
       pendingPageJump = std::numeric_limits<uint16_t>::max();
       currentSpineIndex--;
+      pendingPageTurnDir = 0;
       section.reset();
       lastPageTurnTime = millis();
       return true;
@@ -1607,9 +1618,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     loadFailurePopup.processRender(renderer, mappedInput);
     return;
   }
+  if (fontPromptState == FontPromptState::TooLarge) {
+    fontpreload::drawTooLargeNotice(renderer);
+    renderer.displayBuffer();
+    return;
+  }
   ReaderActivity::render(std::move(lock));
   // Rebuild the page underneath, including after a global control-center visit.
-  if (fontPromptState != FontPromptState::Idle) overlayPopup.processRender(renderer, mappedInput);
+  if (fontPromptState != FontPromptState::Idle) {
+    overlayPopup.processRender(renderer, mappedInput);
+  }
 }
 
 bool EpubReaderActivity::skipLoopDelay() {
@@ -1670,14 +1688,17 @@ void EpubReaderActivity::renderBook() {
 
   const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
 
+  int bottomReserve = statusBarHeight;
   if (automaticPageTurnActive &&
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
-    orientedMarginBottom +=
-        std::max(SETTINGS.screenMargin,
-                 static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
-  } else {
-    orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
+    bottomReserve += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
   }
+  if (UiHighDpiProfile::enabled && (SETTINGS.statusBarSpec().textLaneVisible() || automaticPageTurnActive)) {
+    // Reuse the footer's unused top space while keeping a gap above its text.
+    bottomReserve -=
+        std::max(0, UITheme::getStatusBarTextTopPadding(renderer) - UiHighDpiProfile::readerContentStatusGap);
+  }
+  orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), bottomReserve);
 #if FREEINK_DEVICE_EEGO_A4
   // The A4's status bar is lifted 4 px so the bezel does not cover it (see
   // BaseTheme::drawStatusBar); reserve the same space for the content.
@@ -2209,7 +2230,7 @@ void EpubReaderActivity::renderIdle(const uint32_t generation) {
   auto forward = layout;
   ++forward.page;
   if (forward.page < static_cast<int>(section->pageCount)) buildPageCacheSlot(0, forward, generation);
-  if (cancelled()) return;
+  if (cancelled() || pageCacheFailed_) return;
   auto backward = layout;
   --backward.page;
   if (backward.page >= 0) buildPageCacheSlot(1, backward, generation);
@@ -2246,8 +2267,8 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
   if (bytes == 0) return false;
   if (!pageCacheBase_[slot]) {
     constexpr size_t kContiguousReserve = 16 * 1024;
-    // Two slots of four planes, charged against PSRAM headroom as a whole.
-    if (memory::psramHasHeadroom(static_cast<size_t>(kPageCacheSlots) * 4 * bytes, bytes, kContiguousReserve)) {
+    // Reserve the slots still to allocate; the forward slot is already charged for slot 1.
+    if (memory::psramHasHeadroom(static_cast<size_t>(kPageCacheSlots - slot) * 4 * bytes, bytes, kContiguousReserve)) {
       pageCacheBase_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
       pageCacheLsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
       pageCacheMsb_[slot] = memory::makePsramByteBufferUninitializedNoThrow(bytes);
@@ -2321,7 +2342,7 @@ bool EpubReaderActivity::buildPageCacheSlot(const int slot, const ReaderPageCach
       !renderPlane(GfxRenderer::GRAYSCALE_MSB, pageCacheMsb_[slot].get()) || cancelled())
     return false;
 #ifdef ENABLE_CHINESE_VERSION
-  pageCacheMissingCodepoint_ = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
+  pageCacheMissingCodepoint_[slot] = fcm ? fcm->consumeMissingChineseCodepoint() : 0;
 #endif
   pageCache_[slot].state = ReaderPageCache::State::Ready;
   LOG_DBG("ERS", "Page cache: slot %d, page %d ready in %lums", slot, key.page, millis() - started);
@@ -2333,6 +2354,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
+  // 一次性取走翻页方向，不留给下一次渲染。每次渲染都可能落到不同分支（图片页、合底图档、
+  // 灰阶路径），而只有文字页那条能播动画 —— 留在这里会让"上上次翻页"的方向在稍后某次
+  // 文字页上误播。取走即清，所以一次翻页最多对应一次渲染。
+  // / Take the turn direction once, here, so it cannot survive into a later render. A render
+  // can land on several branches (image pages, the combined-base profile, the grayscale
+  // paths) and only the text-page branch can animate -- leaving it set would let an older
+  // turn's direction fire on some later text page. Cleared on the way out, so one turn maps
+  // to at most one render.
+  const int8_t revealDir = pendingPageTurnDir;
+  pendingPageTurnDir = -1;
   const int fontId = SETTINGS.getReaderFontId();
   const auto renderPage = [&] {
     GfxRenderer::SyntheticBoldScope syntheticBold(renderer, SETTINGS.fakeBold);
@@ -2513,7 +2544,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
 #ifdef ENABLE_CHINESE_VERSION
 #if FREEINK_DEVICE_READPICO
-  const uint32_t missingCodepoint = pageCacheHit ? pageCacheMissingCodepoint_ : fcm->consumeMissingChineseCodepoint();
+  const uint32_t missingCodepoint =
+      pageCacheHit ? pageCacheMissingCodepoint_[pageCacheLiveSlot_] : fcm->consumeMissingChineseCodepoint();
 #else
   const uint32_t missingCodepoint = fcm->consumeMissingChineseCodepoint();
 #endif
@@ -2557,7 +2589,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
     }
 #else
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    // 错相揭页只挂在这一条：它才是文字页的推送路径（图片页与合底图档在上面各自的分支）。
+    // 动画播放期间面板归它独占，所以要和 overlapRefresh（异步推送）互斥：有动画就同步播完，
+    // 没有才走异步。`pendingPageTurnDir` 用完即清，一次翻页最多播一次。
+    // / The phase-offset reveal hangs off this branch only: it is the text page's push path
+    // (image pages and the combined-base profile have their own above). The reveal owns the
+    // panel until it finishes, so it is mutually exclusive with overlapRefresh (an async
+    // push): animate synchronously when asked, otherwise take the async path.
+    // `pendingPageTurnDir` is consumed here so one turn animates at most once.
+    if (revealDir >= 0 && SETTINGS.pageTurnAnimation != 0) {
+      ReaderUtils::displayWithOptionalReveal(renderer, pagesUntilFullRefresh, revealDir);
+    } else {
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh, overlapRefresh);
+    }
 #endif
   }
   const auto tDisplay = millis();
@@ -3476,8 +3520,11 @@ void EpubReaderActivity::applyReaderTextSettings() {
 void EpubReaderActivity::finishFontPreview() {
   const auto* family = sdFontSystem.registry().findFamily(SETTINGS.sdFontFamilyName);
   const auto* file = family ? family->findNearestSize(SETTINGS.fontPointSize) : nullptr;
-  const bool cached = file && SdCardFontCache::isValidFor(file->path.c_str());
-  const auto decision = fontPreview.finish(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize, cached);
+  const bool supportsPreload = !family || !family->vector;
+  const auto check =
+      file && supportsPreload ? SdCardFontCache::preflight(file->path.c_str()) : SdCardFontCache::Result::InvalidFont;
+  const auto decision = fontPreview.finish(SETTINGS.sdFontFamilyName, SETTINGS.fontPointSize,
+                                           check == SdCardFontCache::Result::AlreadyCached, supportsPreload);
   switch (decision) {
     case ReaderFontPreview::Decision::Keep:
       return;
@@ -3498,21 +3545,50 @@ void EpubReaderActivity::finishFontPreview() {
   SETTINGS.saveToFile();
   if (decision != ReaderFontPreview::Decision::Ask) return;
 
+  if (check == SdCardFontCache::Result::TooLarge) {
+    {
+      RenderLock lock;
+      fontPromptState = FontPromptState::TooLarge;
+    }
+    requestUpdateAndWait();
+    fontNoticeStartedAt = millis();
+    return;
+  }
   {
     RenderLock lock;
-    constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
     fontPromptState = FontPromptState::Asking;
     fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
-    overlayPopup.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 1,
-                      [this](int index) {
-                        RenderLock lock;
-                        if (index == 0) fontPromptState = FontPromptState::Accepted;
-                      });
+    if (check == SdCardFontCache::Result::Ok) {
+      constexpr StrId options[] = {StrId::STR_FONT_PRELOAD_START, StrId::STR_FONT_PRELOAD_SKIP};
+      overlayPopup.show(StrId::STR_FONT_PRELOAD_CONFIRM, options, static_cast<int>(std::size(options)), 0,
+                        [this](int index) {
+                          RenderLock lock;
+                          if (index == 0) fontPromptState = FontPromptState::Accepted;
+                        });
+    } else {
+      constexpr StrId options[] = {StrId::STR_OK_BUTTON};
+      overlayPopup.show(fontpreload::failureMessage(check), options, static_cast<int>(std::size(options)), 0, {});
+    }
   }
   requestUpdate();
 }
 
 void EpubReaderActivity::handleFontPreloadPrompt() {
+  if (fontPromptState == FontPromptState::TooLarge) {
+    if (millis() - fontNoticeStartedAt >= fontpreload::NOTICE_DURATION_MS) {
+      for (uint8_t button = 0; button < MappedInputManager::kButtonCount; ++button) {
+        if (mappedInput.isPressed(static_cast<MappedInputManager::Button>(button))) return;
+      }
+      int x = 0, y = 0;
+      if (mappedInput.isScreenTouchHeld(x, y)) return;
+      {
+        RenderLock lock;
+        fontPromptState = FontPromptState::Idle;
+      }
+      requestUpdate();
+    }
+    return;
+  }
   if (fontPromptWaitForBackRelease) {
     fontPromptWaitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
     return;  // Consume the inherited release as well as the hold.

@@ -368,6 +368,14 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t characterSpacing = CHARACTER_SPACING_OFFSET;
   int8_t getCharacterSpacing() const { return static_cast<int8_t>(characterSpacing - CHARACTER_SPACING_OFFSET); }
   uint8_t textAntiAliasing = 1;
+  // 错相揭页（"翻页动画"）。纯装饰：翻页以逐带揭开的方式画出，约 1.1s，而普通文字页推送
+  // 约 0.7s，所以默认关闭、由用户自己开。只有 Read Pico 的面板实现了这个效果，别的板子上
+  // 阅读器会退回普通推送，开关留着不影响它们。
+  // / Phase-offset page reveal ("page turn animation"). Cosmetic: the turn is drawn as a
+  // staggered reveal costing ~1.1 s against ~0.7 s for a plain text page push, hence
+  // opt-in. Only the Read Pico panel implements the reveal; on other boards the reader
+  // falls back to a normal push and the switch is inert.
+  uint8_t pageTurnAnimation = 0;
   uint8_t fakeBold = SYNTHETIC_BOLD_STANDARD;
   uint8_t readingBackgroundEnabled = 0;
   uint8_t readingGuideLineEnabled = 0;

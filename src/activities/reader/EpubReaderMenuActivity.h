@@ -28,7 +28,12 @@ class EpubReaderMenuActivity final : public UiListActivity {
     SYNC,
     DELETE_CACHE,
     DICTIONARY,
-    IMAGE_SCALING  // Legacy action ID; image scaling remains in Settings.
+    IMAGE_SCALING,  // Legacy action ID; image scaling remains in Settings.
+    // 错相揭页开关。只在实现了该效果的板子上出现（Read Pico），见 EpubReaderMenuActivity.cpp
+    // 的 buildMenuItems。
+    // / Phase-offset page reveal toggle. Listed only on boards that implement the effect
+    // (Read Pico); see buildMenuItems.
+    PAGE_TURN_ANIMATION
   };
 
   struct MenuItem {

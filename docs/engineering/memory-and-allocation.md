@@ -167,3 +167,50 @@ Verify external BSS symbols in the final ELF and require cold boot, AP/STA,
 transfer and BLE acceptance. Display buffers and task stacks keep their existing
 allocation requirements. The ordinary malloc threshold, mDNS allocation policy
 and NVS cache policy remain unchanged while testing this configuration.
+
+### TLS preflight and PSRAM
+
+Font manifest and OPDS download preflight use `HttpDownloader::hasMemoryForTls()`.
+Its 40,000-byte free / 20,000-byte largest-block floors are measured through
+`HalMemory::getDefaultHeap()`, matching the ordinary allocator used by wolfSSL.
+Registered PSRAM counts; `ESP.getFreeHeap()` only reports internal RAM and can
+reject a valid ReadPico transfer before it starts. No-PSRAM targets retain the
+same floors. This check is a heuristic, not a reservation or a guarantee that
+later TLS, driver, or parsing allocations will succeed. Failure logs distinguish
+default, internal and PSRAM capacity; font phase logs locate subsequent failures.
+
+### JPEG preflight and recoverable AirPage display failures
+
+JPEG dimension probing, framebuffer decode and JPEG-to-BMP conversion use
+`HalMemory::getDefaultHeap()` for ordinary `makeUniqueNoThrow<JPEGDEC>()`
+allocations, including registered PSRAM. The unchanged floors are
+`sizeof(JPEGDEC) + 16 KiB` free and `sizeof(JPEGDEC)` contiguous. Framebuffer
+scratch loans still bypass this heap preflight. Actual allocation remains
+fallible; diagnostics distinguish default, internal and PSRAM heaps.
+
+AirPage keeps pending downloads, backups and history images when rendering
+fails. JPEG preflight/allocation failures report insufficient memory; other
+render failures report a retryable display failure, not proven corruption.
+The history list includes a pending current image so it can be selected again
+without downloading. Only successful display commits/archives the pending
+image during the session; subsequent pushes and startup retain the existing
+recovery policy. Header validation retains its existing invalid-file handling.
+No decoder or full-screen buffer is retained between attempts, and internal
+DMA reserves are unchanged. Verify repeated JPEG/BMP pushes, retries and sleep
+wallpaper conversion on Read Pico; host tests cannot establish optical quality.
+
+### AirPage image storage and paging
+
+New AirPage downloads, current images (`latest.bmp`/`latest.jpg`), timestamp-named
+archives and pixel caches share `/AirPage`. Existing `/.crosspoint/airpage`
+images are neither migrated nor read; device preferences retain their hidden
+paths. `/sleep.bmp` remains the installed wallpaper destination.
+
+History files have no count-based retention limit. The store keeps one 20-entry
+page, with current first on the first page and descending archive ID/format order.
+Previous/next rows reuse the existing list controls. Page scans use fixed RAM;
+latency grows with directory size because each page scans the files. Unknown
+files and orphan caches are left untouched. Sequence allocation scans disk rather
+than the current page to avoid overwriting older archives. Test more than 20
+images, paging in both directions, restart, failed display/retry and full-SD
+archive failure; a successful build does not verify touch or optical behavior.
